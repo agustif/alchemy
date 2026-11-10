@@ -27,7 +27,7 @@ test(
       expect(issue.htmlUrl).toContain("github.com");
     }
   }),
-  { timeout: 120_000 },
+  { tags: ["provider:github", "provider:github:query", "live"], timeout: 120_000 },
 );
 
 test(
@@ -44,7 +44,7 @@ test(
       expect(issue.state).toBe("open");
     });
   }),
-  { timeout: 120_000 },
+  { tags: ["provider:github", "provider:github:query", "live"], timeout: 120_000 },
 );
 
 test(
@@ -68,7 +68,7 @@ test(
       expect(typeof pr.merged).toBe("boolean");
     }
   }),
-  { timeout: 120_000 },
+  { tags: ["provider:github", "provider:github:query", "live"], timeout: 120_000 },
 );
 
 test(
@@ -90,7 +90,7 @@ test(
     expect(issue.title).toBeDefined();
     expect(issue.state).toMatch(/^(open|closed)$/);
   }),
-  { timeout: 120_000 },
+  { tags: ["provider:github", "provider:github:query", "live"], timeout: 120_000 },
 );
 
 test(
@@ -113,5 +113,5 @@ test(
     expect(pr.head).toBeDefined();
     expect(pr.base).toBeDefined();
   }),
-  { timeout: 120_000 },
+  { tags: ["provider:github", "provider:github:query", "live"], timeout: 120_000 },
 );
