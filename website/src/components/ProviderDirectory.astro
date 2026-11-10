@@ -50,6 +50,14 @@ const firstLink = (nodes: SidebarNode[]): string | undefined => {
 
 /** Every provider has a docs hub: each card links to it. */
 const HUBS: Record<string, { href: string; blurb: string }> = {
+  ACME: {
+    href: "/acme",
+    blurb: "Certificate authority accounts, DNS-01 validation, and TLS certificates",
+  },
+  E2B: {
+    href: "/e2b",
+    blurb: "Sandboxes, templates, snapshots, volumes, and secrets for agents",
+  },
   Cloudflare: {
     href: "/cloudflare",
     blurb: "Workers, Durable Objects, D1, R2, Queues, Hyperdrive",
@@ -57,6 +65,14 @@ const HUBS: Record<string, { href: string; blurb: string }> = {
   AWS: {
     href: "/aws",
     blurb: "Lambda, ECS, EKS, EC2, DynamoDB, S3, SQS, Kinesis",
+  },
+  Archil: {
+    href: "/archil",
+    blurb: "Serverless exec, sandboxes, programs and websites on durable disks",
+  },
+  Boat: {
+    href: "/boat",
+    blurb: "Sandboxes that stop with their disk saved, snapshots, forks and programs",
   },
   Hetzner: {
     href: "/hetzner",
@@ -75,6 +91,7 @@ const HUBS: Record<string, { href: string; blurb: string }> = {
     blurb: "Serverless MySQL & Postgres with branching workflows",
   },
   Neon: { href: "/neon", blurb: "Serverless Postgres with branches per PR" },
+  Modal: { href: "/modal", blurb: "Agent sandboxes, images, volumes, and GPUs" },
   Axiom: { href: "/axiom", blurb: "Logs, traces, dashboards, and monitors" },
   BetterAuth: {
     href: "/better-auth",
@@ -85,13 +102,17 @@ const HUBS: Record<string, { href: string; blurb: string }> = {
     href: "/docker",
     blurb: "Images, containers, networks, and volumes via the Docker CLI",
   },
+  Kubernetes: {
+    href: "/kubernetes",
+    blurb: "Deployments, Jobs, manifests, and Helm charts on any cluster",
+  },
   Drizzle: {
     href: "/sql",
     blurb: "Schemas and migrations as deploy-graph resources",
   },
   SQL: {
     href: "/sql",
-    blurb: "Low-level effect-sql clients — tagged-template SQL as Effects",
+    blurb: "Effect SQL, Drizzle, and Prisma across cloud and database providers",
   },
   Command: {
     href: "/command",

@@ -3,46 +3,42 @@ title: EKS
 description: Stand up an EKS Auto Mode cluster on a Network and run containers on it — Deployments for servers, Jobs for run-to-completion work, Manifests for everything else. No YAML, no kubectl.
 ---
 
-**EKS** (Elastic Kubernetes Service) is AWS's managed Kubernetes:
-AWS runs the Kubernetes control plane, and your containers run on
-it as Kubernetes objects. Alchemy targets **Auto Mode**, where AWS
-also manages the nodes, storage, and load-balancer integration —
-no machines to operate.
+import Tree from "../../../../components/diagrams/Tree.astro";
 
-The Kubernetes primitives you'll meet here:
+EKS is AWS's managed Kubernetes. AWS runs the Kubernetes control plane, and your containers run on it as Kubernetes objects. In **Auto Mode**, AWS also manages the nodes, their storage and their load balancers, so there are no machines to operate.
 
-- A **Cluster** is one Kubernetes installation: the API server
-  plus the Nodes that run your containers.
-- A **Pod** is one or more containers running together — the unit
-  Kubernetes schedules onto Nodes.
-- A **Deployment** keeps a set number of identical Pods running,
-  replacing ones that fail. A **Service** gives them one stable
-  address — and, as type `LoadBalancer`, a public one.
-- A **Job** runs a Pod to completion; a **CronJob** does that on a
-  schedule.
-- Everything in Kubernetes is an object described by a
-  **manifest** you apply to the Cluster.
+Choose EKS when you want Kubernetes itself: Helm charts, operators, raw manifests, or a team that already runs on it. For containers without Kubernetes, [ECS](/aws/compute/ecs) has less to learn and less to pay for.
 
-Alchemy models these directly:
-[`Cluster`](/providers/aws/eks/cluster) with `compute: "auto"`
-stands up the control plane from a VPC, and the cluster-agnostic
-`alchemy/Kubernetes` workloads target it by passing the cluster
-resource as their `cluster` prop:
-[`Kubernetes.Deployment`](/providers/kubernetes/deployment)
-synthesizes a Kubernetes `Deployment` + `Service`;
-[`Kubernetes.Job`](/providers/kubernetes/job) a `Job` or `CronJob`;
-and [`Kubernetes.Manifest`](/providers/kubernetes/manifest) applies
-any raw Kubernetes object. The workloads live in the same TypeScript
-program as the cluster, with no YAML and no `kubectl apply` step —
-and the same workloads run on any other cluster your kubeconfig can
-reach (`Kubernetes.KubeConfig(...)`).
+## Clusters, Pods, Deployments and Jobs
+
+A **cluster** is one Kubernetes installation: an API server and the **nodes** that run containers. A **Pod** is one or more containers scheduled together onto a node. A **Deployment** keeps a number of identical Pods running and replaces any that fail, and a **Service** gives them one stable address, public if it's a `LoadBalancer`. A **Job** runs a Pod until it finishes, and a **CronJob** runs one on a schedule.
+
+<Tree
+  nodes={[
+    { id: "cluster", label: "EKS cluster", type: "Auto Mode" },
+    { id: "api", label: "API server", type: "the objects you apply", parent: "cluster", wide: true, dashed: true },
+    { id: "deploy", label: "web", type: "Deployment · 2 replicas", parent: "api", tone: "accent" },
+    { id: "svc", label: "web", type: "Service · LoadBalancer", parent: "api", tone: "accent" },
+    { id: "job", label: "migrate", type: "Job", parent: "api" },
+    { id: "n1", label: "node 1", type: "added by Auto Mode", parent: "cluster", dashed: true },
+    { id: "n2", label: "node 2", type: "added by Auto Mode", parent: "cluster", dashed: true },
+    { id: "p1", label: "web-7f9c", type: "Pod · app=web", parent: "n1", tone: "accent" },
+    { id: "p2", label: "web-k2p4", type: "Pod · app=web", parent: "n2", tone: "accent" },
+    { id: "p3", label: "migrate-x8", type: "Pod · completed", parent: "n2", tone: "muted" },
+  ]}
+  caption="You apply objects to the API server, and Kubernetes makes them real. The Deployment keeps two web Pods running, the Service sends traffic to every Pod labelled app=web, and the Job's Pod ran once and finished. Auto Mode adds nodes as the Pods need room."
+/>
+
+Every one of these is an object, described by a **manifest** and applied to the cluster.
+
+In Alchemy, `AWS.EKS.Cluster` creates the cluster from a VPC. The workloads come from `@alchemy.run/kubernetes`: `Kubernetes.Deployment` creates a Deployment and its Service, `Kubernetes.Job` a Job or CronJob, and `Kubernetes.Manifest` any other object. Each takes the cluster as its `cluster` prop, in the same program, with no YAML and no `kubectl`. The same workloads run on any cluster your kubeconfig reaches.
 
 The workload providers ship in `Kubernetes.providers()` — compose it
 with `AWS.providers()` in the Stack:
 
 ```typescript
-import * as AWS from "alchemy/AWS";
-import * as Kubernetes from "alchemy/Kubernetes";
+import * as AWS from "@alchemy.run/aws";
+import * as Kubernetes from "@alchemy.run/kubernetes";
 import * as Layer from "effect/Layer";
 
 export default Alchemy.Stack(
@@ -65,7 +61,7 @@ node IAM roles with the standard Auto Mode managed policies:
 
 ```typescript
 // alchemy.run.ts
-import * as AWS from "alchemy/AWS";
+import * as AWS from "@alchemy.run/aws";
 
 const network = yield* AWS.EC2.Network("Network", {
   cidrBlock: "10.42.0.0/16",
@@ -266,11 +262,104 @@ const ingress = yield* Kubernetes.HelmChart("IngressNginx", {
 `chart` also accepts `oci://` references and local chart directories,
 and `values` is a literal object — the same shape as a `values.yaml`
 file. Because the objects are applied (not `helm install`ed), Alchemy
-owns their lifecycle: drift is corrected on every deploy, objects
-that drop out of the render are pruned, and destroy deletes them —
+owns their lifecycle: the full render is re-applied whenever the
+chart's inputs change, objects that drop out of the render are
+pruned, and destroy deletes them —
 there is no in-cluster Helm release record. Charts that rely on
 install/upgrade hooks for correctness should be installed with Helm
 directly.
+
+## What EKS adds to Kubernetes workloads
+
+The `Kubernetes.*` resources are cluster-agnostic. When their
+`cluster` is an EKS cluster, `AWS.providers()` contributes an
+adapter that handles the AWS-specific parts.
+
+### Authentication
+
+Alchemy signs a short-lived bearer token with your AWS credentials
+for every request, so there is no kubeconfig to manage. It's the
+same token `aws eks get-token` produces. The principal that created the
+cluster is its admin. Grant anyone else access with
+[`AccessEntry`](/providers/aws/eks/accessentry).
+
+### Images in ECR
+
+Each `Deployment` and `Job` gets its own private ECR repository.
+`main` programs are bundled and built into an image, `context`
+Dockerfiles are built, and `image` references are pulled and pushed
+into the repository, so pods only pull from your account. Set
+`architecture: "arm64"` for Graviton nodes. The default builds
+`amd64`. The repository is deleted when the workload is destroyed.
+
+### Pod Identity
+
+Each workload gets an IAM role and a
+[`PodIdentityAssociation`](/providers/aws/eks/podidentityassociation)
+for its ServiceAccount. AWS bindings used by the workload add their
+IAM statements to that role, and the pod receives temporary
+credentials for it through the EKS Pod Identity agent. Attach
+AWS-managed or customer-managed policies with
+`identity.managedPolicyArns`:
+
+```typescript
+const exporter = yield* Kubernetes.Job("Export", {
+  cluster,
+  main: import.meta.url,
+  identity: {
+    managedPolicyArns: ["arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"],
+  },
+});
+```
+
+### Load balancers
+
+Auto Mode's built-in load balancer controller only handles Services
+with `loadBalancerClass: eks.amazonaws.com/nlb`, and creates internal
+load balancers by default. On `LoadBalancer` Services Alchemy sets
+that class (when the cluster has Auto Mode load balancing enabled)
+and the `service.beta.kubernetes.io/aws-load-balancer-scheme:
+internet-facing` annotation, so `url` is reachable from the
+internet. Your own `serviceAnnotations` take precedence. Set the
+scheme to `internal` to keep a service private:
+
+```typescript
+const internal = yield* Kubernetes.Deployment("Internal", {
+  cluster,
+  image: "ghcr.io/acme/internal:v1",
+  port: 8080,
+  serviceAnnotations: {
+    "service.beta.kubernetes.io/aws-load-balancer-scheme": "internal",
+  },
+});
+```
+
+### Cleanup
+
+The ECR repository and Pod Identity role outlive the cluster's own
+objects. On destroy Alchemy deletes the in-cluster objects if the
+cluster is still reachable, then deletes the repository and role
+whether or not the cluster still exists, so destroying a cluster and
+its workloads together leaves nothing behind in AWS.
+
+## Target an EKS cluster you don't manage
+
+To deploy onto a cluster created elsewhere, name it in a connection.
+The adapter looks up the endpoint and certificate authority from the
+cluster name:
+
+```typescript
+const cluster: Kubernetes.Connection = {
+  auth: { kind: "aws-eks", clusterName: "shared-prod", region: "us-west-2" },
+};
+```
+
+`region` defaults to the Stack's AWS region. The `aws-eks` auth kind
+is added to the `Kubernetes.Connection` type by importing
+`@alchemy.run/aws`, and it requires `AWS.providers()` in the Stack. Your
+AWS principal needs an access entry on the cluster. Workloads get
+the same ECR, Pod Identity, and load balancer behavior as on a
+Stack-managed cluster.
 
 ## Run on SageMaker HyperPod
 
@@ -333,6 +422,10 @@ surface.
 
 ## Where next
 
+- [Kubernetes](/kubernetes) — the full guide to `Kubernetes.*`
+  workloads, manifests, and Helm charts, with a
+  [tutorial](/kubernetes/tutorial/part-1) you can run on a local
+  cluster before deploying to EKS.
 - [VPC & networking](/aws/networking) — what the `Network` helper
   builds under the cluster.
 - [HyperPod](/aws/compute/hyperpod) — run training fleets on this

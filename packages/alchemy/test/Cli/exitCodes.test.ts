@@ -1,13 +1,17 @@
-import { PlatformServices } from "@/Util/PlatformServices.ts";
-import { describe, expect, it } from "alchemy-test";
-import { nodePath, nodeSupportsDevMode } from "../nodeProbe.ts";
-import * as Effect from "effect/Effect";
-import * as Stream from "effect/Stream";
-import * as FileSystem from "effect/FileSystem";
-import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "@alchemy.run/test";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as ChildProcess from "effect/process/ChildProcess";
+import * as Stream from "effect/Stream";
+import { PlatformServices } from "@/Util/PlatformServices.ts";
+import { nodePath, nodeSupportsDevMode } from "../nodeProbe.ts";
 
 const CLI = fileURLToPath(new URL("../../bin/cli.js", import.meta.url));
+const DESTROY_FIXTURE = fileURLToPath(
+  new URL("./fixtures/destroy-skips-program.ts", import.meta.url),
+);
+const DRIFT_FIXTURE = fileURLToPath(new URL("./fixtures/drift-exit-codes.ts", import.meta.url));
 
 /**
  * Run the CLI with no TTY on any stdio and return its exit code. Each
@@ -38,7 +42,152 @@ const exitCodeOf = (
     return yield* handle.exitCode;
   }).pipe(Effect.scoped, Effect.provide(PlatformServices));
 
-describe("CLI exit codes", () => {
+/** Like {@link exitCodeOf}, but from an empty project directory with output captured. */
+const runInEmptyProject = (args: ReadonlyArray<string>, runtime = "bun") =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const home = yield* fs.makeTempDirectoryScoped({
+      prefix: "alchemy-exit-codes-",
+    });
+    const project = yield* fs.makeTempDirectoryScoped({
+      prefix: "alchemy-empty-project-",
+    });
+    const handle = yield* ChildProcess.make(runtime, [CLI, ...args], {
+      cwd: project,
+      env: { ALCHEMY_HOME: home },
+      extendEnv: true,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+      killSignal: "SIGTERM",
+      forceKillAfter: "1 second",
+    });
+    const [stdout, stderr, exitCode] = yield* Effect.all(
+      [
+        handle.stdout.pipe(Stream.decodeText, Stream.mkString),
+        handle.stderr.pipe(Stream.decodeText, Stream.mkString),
+        handle.exitCode,
+      ],
+      { concurrency: 3 },
+    );
+    return { stdout, stderr, exitCode };
+  }).pipe(Effect.scoped, Effect.provide(PlatformServices));
+
+describe("CLI exit codes", { tags: ["unit", "local"] }, () => {
+  it.live("dev without a stack entrypoint reports it and exits 1", () =>
+    Effect.gen(function* () {
+      const { stderr, exitCode } = yield* runInEmptyProject(["dev"]);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("Stack entrypoint 'alchemy.run.ts' does not exist");
+      expect(stderr).not.toContain("PlatformError");
+      expect(stderr).not.toContain("at Effect.fn");
+    }),
+  );
+
+  it.live.skipIf(!nodeSupportsDevMode)(
+    "dev without a stack entrypoint reports it and exits 1 under node",
+    () =>
+      Effect.gen(function* () {
+        const { stderr, exitCode } = yield* runInEmptyProject(["dev"], nodePath!);
+        expect(exitCode).toBe(1);
+        expect(stderr).toContain("Stack entrypoint 'alchemy.run.ts' does not exist");
+        expect(stderr).not.toContain("PlatformError");
+      }),
+  );
+
+  it.live("plan accepts --adopt like deploy --dry-run", () =>
+    Effect.gen(function* () {
+      const { stderr, exitCode } = yield* runInEmptyProject(["plan", "--adopt"]);
+      expect(exitCode).toBe(1);
+      expect(stderr).not.toContain("Unrecognized flag");
+      expect(stderr).toContain("Stack entrypoint 'alchemy.run.ts' does not exist");
+    }),
+  );
+
+  // #1976: destroying a stage created by `alchemy dev` must not evaluate the
+  // program in live mode, where declarations may call the real cloud.
+  it.live("destroy plans from state without evaluating the stack program", () =>
+    Effect.gen(function* () {
+      const { stdout, stderr, exitCode } = yield* runInEmptyProject([
+        "destroy",
+        "--config",
+        DESTROY_FIXTURE,
+        "--stage",
+        "cli_destroy",
+        "--yes",
+      ]);
+      expect(stdout + stderr).not.toContain("STACK_PROGRAM_EVALUATED");
+      expect(exitCode).toBe(0);
+    }),
+  );
+
+  it.live("deploy evaluates the stack program", () =>
+    Effect.gen(function* () {
+      const { stdout, stderr, exitCode } = yield* runInEmptyProject([
+        "deploy",
+        "--config",
+        DESTROY_FIXTURE,
+        "--stage",
+        "cli_destroy",
+        "--yes",
+      ]);
+      expect(stdout + stderr).toContain("STACK_PROGRAM_EVALUATED");
+      expect(exitCode).toBe(1);
+    }),
+  );
+
+  // #2987: a scheduled `alchemy drift` must tell drift (2) from a clean
+  // stage (0) and a failed check (1) without parsing the printed plan.
+  it.live("drift exits 0 in sync, 2 on unrepaired drift, 1 when it can't check", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "alchemy-exit-codes-" });
+      const project = yield* fs.makeTempDirectoryScoped({ prefix: "alchemy-drift-project-" });
+      const run = (args: ReadonlyArray<string>, cloud?: string) =>
+        Effect.gen(function* () {
+          const handle = yield* ChildProcess.make(
+            "bun",
+            [CLI, ...args, "--config", DRIFT_FIXTURE, "--stage", "cli_drift"],
+            {
+              cwd: project,
+              env: { ALCHEMY_HOME: home, ...(cloud ? { DRIFT_FIXTURE_CLOUD: cloud } : {}) },
+              extendEnv: true,
+              stdin: "ignore",
+              stdout: "pipe",
+              stderr: "pipe",
+              killSignal: "SIGTERM",
+              forceKillAfter: "1 second",
+            },
+          );
+          const [output, exitCode] = yield* Effect.all(
+            [
+              Stream.merge(handle.stdout, handle.stderr).pipe(Stream.decodeText, Stream.mkString),
+              handle.exitCode,
+            ],
+            { concurrency: 2 },
+          );
+          return { exitCode, output };
+        }).pipe(Effect.scoped);
+
+      const exitCodes = {
+        deploy: (yield* run(["deploy", "--yes"])).exitCode,
+        inSync: (yield* run(["drift"])).exitCode,
+        drifted: (yield* run(["drift"], "missing")).exitCode,
+        unreadable: (yield* run(["drift"], "broken")).exitCode,
+        repaired: (yield* run(["drift", "--repair", "--yes"], "missing")).exitCode,
+        destroy: (yield* run(["destroy", "--yes"])).exitCode,
+      };
+      expect(exitCodes).toEqual({
+        deploy: 0,
+        inSync: 0,
+        drifted: 2,
+        unreadable: 1,
+        repaired: 0,
+        destroy: 0,
+      });
+    }).pipe(Effect.scoped, Effect.provide(PlatformServices)),
+  );
+
   it.live("bare `profile` without a terminal prints help and exits 1", () =>
     Effect.gen(function* () {
       expect(yield* exitCodeOf(["profile"])).toBe(1);
@@ -54,6 +203,12 @@ describe("CLI exit codes", () => {
   it.live("--no-input is accepted and forces a plain, working run", () =>
     Effect.gen(function* () {
       expect(yield* exitCodeOf(["--no-input", "profile", "list"])).toBe(0);
+    }),
+  );
+
+  it.live("--fast-distilled is accepted", () =>
+    Effect.gen(function* () {
+      expect(yield* exitCodeOf(["--no-input", "--fast-distilled", "profile", "list"])).toBe(0);
     }),
   );
 
@@ -108,43 +263,5 @@ describe("CLI exit codes", () => {
           stderr: exitCode === 0 ? "" : stderr,
         }).toEqual({ exitCode: 0, stderr: "" });
       }).pipe(Effect.scoped, Effect.provide(PlatformServices)),
-  );
-
-  it.live("provider check-env exits 1 when a required var is missing", () =>
-    Effect.gen(function* () {
-      expect(
-        yield* exitCodeOf(["provider", "check-env", "--provider", "neon"], {
-          NEON_API_KEY: "",
-        }),
-      ).toBe(1);
-    }),
-  );
-
-  it.live("provider check-env exits 0 when the contract is satisfied", () =>
-    Effect.gen(function* () {
-      expect(
-        yield* exitCodeOf(["provider", "check-env", "--provider", "neon"], {
-          NEON_API_KEY: "napi_test_key",
-        }),
-      ).toBe(0);
-    }),
-  );
-
-  it.live("provider check-env accepts an explicit profile", () =>
-    Effect.gen(function* () {
-      expect(
-        yield* exitCodeOf(
-          [
-            "provider",
-            "check-env",
-            "--profile",
-            "default",
-            "--provider",
-            "neon",
-          ],
-          { NEON_API_KEY: "napi_test_key" },
-        ),
-      ).toBe(0);
-    }),
   );
 });

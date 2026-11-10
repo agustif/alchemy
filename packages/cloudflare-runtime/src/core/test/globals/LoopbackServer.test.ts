@@ -1,9 +1,11 @@
 import { expect, layer } from "@effect/vitest";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import * as Layer from "effect/Layer";
 import * as LoopbackServer from "../../globals/LoopbackServer.ts";
 
-layer(LoopbackServer.LoopbackServerLive)((it) => {
+layer(LoopbackServer.LoopbackServerLive.pipe(Layer.provide(SecureRandom.layerWebCrypto)))((it) => {
   it.effect("starts a loopback server", () =>
     Effect.gen(function* () {
       const loopbackServer = yield* LoopbackServer.LoopbackServer;
@@ -26,8 +28,7 @@ layer(LoopbackServer.LoopbackServerLive)((it) => {
         fetch(`http://${loopbackServer.address}`, {
           headers: {
             [LoopbackServer.LoopbackServerHeaders.TARGET]: "test-raw",
-            [LoopbackServer.LoopbackServerHeaders.SECRET]:
-              loopbackServer.secret,
+            [LoopbackServer.LoopbackServerHeaders.SECRET]: loopbackServer.secret,
           },
         }).then(async (res) => ({
           status: res.status,
@@ -53,8 +54,7 @@ layer(LoopbackServer.LoopbackServerLive)((it) => {
       const response = yield* Effect.promise(() =>
         fetch(`http://${loopbackServer.address}`, {
           headers: {
-            [LoopbackServer.LoopbackServerHeaders.SECRET]:
-              loopbackServer.secret,
+            [LoopbackServer.LoopbackServerHeaders.SECRET]: loopbackServer.secret,
             [LoopbackServer.LoopbackServerHeaders.TARGET]: "test-effect",
           },
         }).then(async (res) => ({
@@ -77,8 +77,7 @@ layer(LoopbackServer.LoopbackServerLive)((it) => {
       const response = yield* Effect.promise(() =>
         fetch(`http://${loopbackServer.address}`, {
           headers: {
-            [LoopbackServer.LoopbackServerHeaders.SECRET]:
-              loopbackServer.secret,
+            [LoopbackServer.LoopbackServerHeaders.SECRET]: loopbackServer.secret,
             [LoopbackServer.LoopbackServerHeaders.TARGET]: "test2",
           },
         }).then(async (res) => ({
@@ -133,8 +132,7 @@ layer(LoopbackServer.LoopbackServerLive)((it) => {
       const response = yield* Effect.promise(() =>
         fetch(`http://${loopbackServer.address}`, {
           headers: {
-            [LoopbackServer.LoopbackServerHeaders.SECRET]:
-              loopbackServer.secret,
+            [LoopbackServer.LoopbackServerHeaders.SECRET]: loopbackServer.secret,
           },
         }).then(async (res) => ({
           status: res.status,

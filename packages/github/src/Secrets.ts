@@ -1,0 +1,142 @@
+import type { Input } from "alchemy/Input";
+import * as Output from "alchemy/Output";
+import * as Config from "effect/Config";
+import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
+import type { Environment } from "./Environment.ts";
+import { Secret } from "./Secret.ts";
+
+export interface SecretsProps {
+  /**
+   * Repository owner (user or organization).
+   */
+  owner: string;
+
+  /**
+   * Repository name.
+   */
+  repository: string;
+
+  /**
+   * Optional environment. When set every secret is scoped to that GitHub
+   * Actions environment instead of the whole repository. Accepts an
+   * environment name or a `GitHub.Environment` resource.
+   */
+  environment?: string | Environment;
+
+  /**
+   * Map of secret name to value. Plain strings are wrapped with
+   * `Redacted.make`; already-redacted values are passed through.
+   */
+  secrets: Record<string, Input<string | Redacted.Redacted<string>>>;
+}
+
+/**
+ * Bulk-creates a set of {@link Secret}s in the same repository (and
+ * optionally the same environment).
+ *
+ * Each entry in `secrets` becomes one `GitHub.Secret` resource, using the
+ * map key as both the alchemy logical id and the secret name.
+ *
+ * Plain strings are automatically wrapped with `Redacted.make`;
+ * already-redacted values and `Config` values are passed through.
+ *
+ * ### Basic Usage
+ * **Example:** Repository Secrets
+ * ```ts
+ * yield* GitHub.Secrets({
+ *   owner: "my-org",
+ *   repository: "my-repo",
+ *   secrets: {
+ *     AXIOM_INGEST_TOKEN: tokenValue,
+ *     AXIOM_DATASET_TRACES: traces.name,
+ *     API_KEY: "sk_live_...", // auto-wrapped with Redacted.make
+ *   },
+ * });
+ * ```
+ *
+ * ### Environment-Scoped Secrets
+ * **Example:** Production Environment Credentials
+ * ```ts
+ * const production = yield* GitHub.Environment("production", {
+ *   owner: "my-org",
+ *   repository: "my-repo",
+ *   name: "production",
+ *   reviewers: { teams: ["platform"] },
+ * });
+ *
+ * yield* GitHub.Secrets({
+ *   owner: "my-org",
+ *   repository: "my-repo",
+ *   environment: production,
+ *   secrets: {
+ *     DATABASE_URL: db.connectionString,
+ *     AWS_ROLE_ARN: role.roleArn,
+ *     STRIPE_SECRET_KEY: Config.secret("STRIPE_SECRET_KEY"),
+ *   },
+ * });
+ * ```
+ *
+ * ### Complete CI/CD Stack
+ * **Example:** Infrastructure with Automatic Secret Wiring
+ * ```ts
+ * // Provision cloud resources
+ * const role = yield* AWS.IAM.Role("deploy-role", {
+ *   assumeRolePolicy: {}, // OIDC trust for GitHub Actions
+ * });
+ *
+ * const bucket = yield* AWS.S3.Bucket("artifacts", {});
+ * const table = yield* AWS.DynamoDB.Table("state", {});
+ *
+ * const env = yield* GitHub.Environment("production", {
+ *   owner: "my-org",
+ *   repository: "api",
+ *   name: "production",
+ *   waitTimer: 30,
+ *   preventSelfReview: true,
+ * });
+ *
+ * // Wire outputs into GitHub Actions as secrets
+ * yield* GitHub.Secrets({
+ *   owner: "my-org",
+ *   repository: "api",
+ *   environment: env,
+ *   secrets: {
+ *     AWS_ROLE_ARN: role.roleArn,
+ *     S3_BUCKET: bucket.bucketName,
+ *     DYNAMODB_TABLE: table.tableName,
+ *   },
+ * });
+ * ```
+ *
+ * @resource
+ * @product Actions
+ */
+export const Secrets = ({ owner, repository, environment, secrets }: SecretsProps) =>
+  Effect.forEach(Object.entries(secrets), ([name, value]) =>
+    Secret(name, {
+      owner,
+      repository,
+      environment,
+      name,
+      value: liftValue(value),
+    }),
+  );
+
+// Accepts a plain string, an existing `Redacted<string>`, or a lazy `Input`
+// of either. We must lift through lazy inputs so the inner string gets wrapped
+// after the engine resolves it — otherwise `Redacted.make(input)` produces an
+// opaque `Redacted<Config | Effect | Output>` that the plan cannot resolve.
+const liftValue = (
+  value: Input<string | Redacted.Redacted<string>>,
+): Input<Redacted.Redacted<string>> =>
+  Config.isConfig(value)
+    ? Config.map(value, toRedacted)
+    : Effect.isEffect(value)
+      ? Effect.map(value, toRedacted)
+      : Output.isOutput(value)
+        ? Output.map(value as Output.Output<string | Redacted.Redacted<string>>, toRedacted)
+        : toRedacted(value as string | Redacted.Redacted<string>);
+
+const toRedacted = (value: string | Redacted.Redacted<string>): Redacted.Redacted<string> =>
+  Redacted.isRedacted(value) ? (value as Redacted.Redacted<string>) : Redacted.make(value);

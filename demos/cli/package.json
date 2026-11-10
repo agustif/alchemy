@@ -11,9 +11,11 @@
     "demo": "tcut demo.video.ts"
   },
   "dependencies": {
-    "@effect/platform-bun": "catalog:effect",
-    "@effect/platform-node": "catalog:effect",
+    "@alchemy.run/cloudflare": "workspace:*",
+    "@effect/platform-bun": "catalog:",
+    "@effect/platform-node": "catalog:",
     "alchemy": "workspace:*",
-    "effect": "catalog:effect"
+    "effect": "catalog:",
+    "termcut": "catalog:"
   }
 }
