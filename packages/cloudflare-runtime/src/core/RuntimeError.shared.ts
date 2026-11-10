@@ -8,16 +8,15 @@ import * as Schema from "effect/Schema";
  * Examples: an unsupported binding type, a missing hyperdrive origin, a
  * syntax error in the user's script.
  */
-export class ConfigError extends Schema.TaggedError<ConfigError>()(
-  "ConfigError",
-  {
-    subtag: Schema.String,
-    message: Schema.String,
-    hint: Schema.optional(Schema.String),
-    detail: Schema.optional(Schema.Unknown),
-    cause: Schema.optional(Schema.Defect()),
-  },
-) {}
+export class ConfigError extends Schema.TaggedError<ConfigError>()("ConfigError", {
+  subtag: Schema.String,
+  message: Schema.String,
+  hint: Schema.optional(Schema.String),
+  // `Defect` keeps any value and encodes it as JSON, so an error inside
+  // a serialized event (see `WorkerdEvent`) never fails to encode.
+  detail: Schema.optional(Schema.Defect()),
+  cause: Schema.optional(Schema.Defect()),
+}) {}
 
 /**
  * `SystemError` indicates a problem with the user's environment, the local
@@ -25,16 +24,15 @@ export class ConfigError extends Schema.TaggedError<ConfigError>()(
  * filesystem, network sockets). The user may be able to fix the problem,
  * but it is not a bug in their worker.
  */
-export class SystemError extends Schema.TaggedError<SystemError>()(
-  "SystemError",
-  {
-    subtag: Schema.String,
-    message: Schema.String,
-    hint: Schema.optional(Schema.String),
-    detail: Schema.optional(Schema.Unknown),
-    cause: Schema.optional(Schema.Defect()),
-  },
-) {}
+export class SystemError extends Schema.TaggedError<SystemError>()("SystemError", {
+  subtag: Schema.String,
+  message: Schema.String,
+  hint: Schema.optional(Schema.String),
+  // `Defect` keeps any value and encodes it as JSON, so an error inside
+  // a serialized event (see `WorkerdEvent`) never fails to encode.
+  detail: Schema.optional(Schema.Defect()),
+  cause: Schema.optional(Schema.Defect()),
+}) {}
 
 /**
  * `ApiError` indicates a problem returned from the Cloudflare API or its
@@ -47,7 +45,9 @@ export class ApiError extends Schema.TaggedError<ApiError>()("ApiError", {
   subtag: Schema.String,
   message: Schema.String,
   hint: Schema.optional(Schema.String),
-  detail: Schema.optional(Schema.Unknown),
+  // `Defect` keeps any value and encodes it as JSON, so an error inside
+  // a serialized event (see `WorkerdEvent`) never fails to encode.
+  detail: Schema.optional(Schema.Defect()),
   cause: Schema.optional(Schema.Defect()),
 }) {}
 

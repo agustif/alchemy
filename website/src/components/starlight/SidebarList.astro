@@ -2,8 +2,8 @@
 /**
  * Drop-in replacement for Starlight's internal `SidebarSublist`, keeping its
  * markup, classes, and persistence hooks, plus one addition: group headings
- * get a monochrome icon resolved from the label (lucide concepts, official
- * simple-icons brand marks for providers) — see `src/docs-icons.ts`.
+ * get a monochrome icon resolved from the label (lucide concepts,
+ * vendored official brand marks for providers) — see `src/docs-icons.ts`.
  * The mockup styling itself (small-caps headings, accent bar) lives in
  * `styles/custom.css`.
  */
@@ -134,6 +134,8 @@ const nextGroupIndex = () => {
     justify-content: space-between;
     padding: 0.2em var(--sl-sidebar-item-padding-inline);
     line-height: 1.4;
+    /* WCAG 2.2 target size: at least 24px tall. */
+    min-height: 24px;
     cursor: pointer;
     user-select: none;
   }

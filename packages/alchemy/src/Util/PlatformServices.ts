@@ -1,16 +1,19 @@
-import type { Crypto } from "effect/Crypto";
+import * as Cause from "effect/Cause";
+import * as Digest from "effect/crypto/Digest";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import type { Input as DurationInput } from "effect/Duration";
 import * as Effect from "effect/Effect";
 import type { FileSystem } from "effect/FileSystem";
+import type { HttpServer } from "effect/http/HttpServer";
+import type { ServeError } from "effect/http/HttpServerError";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import type { Path } from "effect/Path";
-import { defaultTeardown, type Teardown } from "effect/Runtime";
+import type { ChildProcessSpawner } from "effect/process/ChildProcessSpawner";
+import { defaultTeardown, getErrorReported, type Teardown } from "effect/Runtime";
+import type { WebSocketConstructor } from "effect/socket/Socket";
 import type { Stdio } from "effect/Stdio";
 import type { Terminal } from "effect/Terminal";
-import type { HttpServer } from "effect/unstable/http/HttpServer";
-import type { ServeError } from "effect/unstable/http/HttpServerError";
-import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner";
-import type { WebSocketConstructor } from "effect/unstable/socket/Socket";
 import { disableCrossSpawnChdir } from "./Node.ts";
 
 const isBun = typeof Bun !== "undefined";
@@ -47,9 +50,13 @@ export const platformLayer = <A, E, R>(constructors: {
     }),
   );
 
+// effect 4.1 dropped crypto from the platform `*Services` bundles.
+const WebCryptoServices = Layer.mergeAll(SecureRandom.layerWebCrypto, Digest.layerWebCrypto);
+
 export type PlatformServices =
   | ChildProcessSpawner
-  | Crypto
+  | Digest.Digest
+  | SecureRandom.SecureRandom
   | FileSystem
   | Path
   | Stdio
@@ -60,16 +67,14 @@ export type PlatformServices =
 export const PlatformServices: Layer.Layer<PlatformServices> = platformLayer({
   bun: async () => {
     const [BunServices, BunSocket] = await Promise.all([
-      importPlatformPeer(
-        "@effect/platform-bun",
-        () => import("@effect/platform-bun/BunServices"),
-      ),
-      importPlatformPeer(
-        "@effect/platform-bun",
-        () => import("@effect/platform-bun/BunSocket"),
-      ),
+      importPlatformPeer("@effect/platform-bun", () => import("@effect/platform-bun/BunServices")),
+      importPlatformPeer("@effect/platform-bun", () => import("@effect/platform-bun/BunSocket")),
     ]);
-    return Layer.merge(BunServices.layer, BunSocket.layerWebSocketConstructor);
+    return Layer.mergeAll(
+      BunServices.layer,
+      BunSocket.layerWebSocketConstructor,
+      WebCryptoServices,
+    );
   },
   node: async () => {
     const [NodeServices, NodeSocket] = await Promise.all([
@@ -77,14 +82,12 @@ export const PlatformServices: Layer.Layer<PlatformServices> = platformLayer({
         "@effect/platform-node",
         () => import("@effect/platform-node/NodeServices"),
       ),
-      importPlatformPeer(
-        "@effect/platform-node",
-        () => import("@effect/platform-node/NodeSocket"),
-      ),
+      importPlatformPeer("@effect/platform-node", () => import("@effect/platform-node/NodeSocket")),
     ]);
-    return Layer.merge(
+    return Layer.mergeAll(
       NodeServices.layer,
       NodeSocket.layerWebSocketConstructor,
+      WebCryptoServices,
     );
   },
 });
@@ -120,7 +123,18 @@ export const runMain = <E, A>(
   const opts = {
     ...options,
     teardown: options?.teardown ?? exitingTeardown,
+    // Reported below instead.
+    disableErrorReporting: true,
   };
+  // The runtime's report of an unhandled failure, on stderr: stdout carries
+  // only a command's output (`--log-format json` records, for one).
+  if (options?.disableErrorReporting !== true) {
+    effect = Effect.tapCause(effect, (cause) =>
+      Cause.hasInterruptsOnly(cause) || !cause.pipe(Cause.squash, getErrorReported)
+        ? Effect.void
+        : Effect.logError(cause).pipe(Effect.provideService(Logger.LogToStderr, true)),
+    );
+  }
   if (isBun) {
     void importPlatformPeer(
       "@effect/platform-bun",

@@ -1,22 +1,20 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { Done } from "effect/Cause";
 import * as ConfigProvider from "effect/ConfigProvider";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as Docker from "../../Docker.ts";
 import * as Globals from "../../globals/Globals.ts";
 import * as Internet from "../../globals/Internet.ts";
 import * as Storage from "../../globals/Storage.ts";
 import * as Paths from "../../internal/Paths.ts";
-import * as Runtime from "../../Runtime.ts";
-import * as RuntimeServices from "../../RuntimeServices.ts";
-import type { BindingHooks, RuntimeWorker } from "../../RuntimeWorker.ts";
 import * as Registry from "../../registry/Registry.ts";
 import * as RegistryProxy from "../../registry/RegistryProxy.ts";
 import {
@@ -24,11 +22,12 @@ import {
   resolvedTargetKey,
   type Subscriber,
 } from "../../registry/RegistryTypes.shared.ts";
+import * as Runtime from "../../Runtime.ts";
+import * as RuntimeServices from "../../RuntimeServices.ts";
+import type { BindingHooks, RuntimeWorker } from "../../RuntimeWorker.ts";
 import * as Workerd from "../../workerd/Workerd.ts";
 
-export const configProvider = (
-  input: { fileSystemSupportsWatcher?: boolean } = {},
-) =>
+export const configProvider = (input: { fileSystemSupportsWatcher?: boolean } = {}) =>
   ConfigProvider.layer(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -36,8 +35,7 @@ export const configProvider = (
         CLOUDFLARE_RUNTIME_HOME: yield* fs.makeTempDirectoryScoped({
           prefix: "cloudflare-runtime-test",
         }),
-        CLOUDFLARE_RUNTIME_FILE_SYSTEM_SUPPORTS_WATCHER:
-          input.fileSystemSupportsWatcher,
+        CLOUDFLARE_RUNTIME_FILE_SYSTEM_SUPPORTS_WATCHER: input.fileSystemSupportsWatcher,
       });
     }),
   );
@@ -51,26 +49,33 @@ export const configProvider = (
  * but **must not** register a remote binding — that would attempt to
  * deploy a preview script and fail without credentials.
  */
-export const localRuntimeLayer = Runtime.RuntimeLive.pipe(
-  Layer.provideMerge(RuntimeServices.layerLocalBindings()),
-  Layer.provideMerge(RuntimeServices.layerProxy()),
-  Layer.provide(Globals.GlobalsLive),
-  Layer.provideMerge(RuntimeServices.layerLoopback()),
-  Layer.provide(
-    Layer.effect(
-      Storage.Storage,
-      Effect.suspend(() => makeTempDirectory()).pipe(Effect.map(Storage.make)),
+export const makeLocalRuntimeLayer = (options: { fileSystemSupportsWatcher?: boolean } = {}) =>
+  Runtime.RuntimeLive.pipe(
+    Layer.provideMerge(RuntimeServices.layerLocalBindings()),
+    Layer.provideMerge(RuntimeServices.layerProxy()),
+    Layer.provide(Globals.GlobalsLive),
+    Layer.provideMerge(RuntimeServices.layerLoopback()),
+    // Merged (not just provided) so suites can locate the storage directory,
+    // e.g. to write files the runtime serves.
+    Layer.provideMerge(
+      Layer.effect(
+        Storage.Storage,
+        Effect.suspend(() => makeTempDirectory()).pipe(Effect.map(Storage.make)),
+      ),
     ),
-  ),
-  Layer.provide(Internet.InternetLive),
-  Layer.provideMerge(RegistryProxy.RegistryProxyLive),
-  Layer.provideMerge(Registry.RegistryLive),
-  Layer.provideMerge(Paths.PathsLive),
-  Layer.provideMerge(Docker.DockerLive),
-  Layer.provide(Workerd.WorkerdLive),
-  Layer.provide(configProvider()),
-  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, FetchHttpClient.layer)),
-);
+    Layer.provide(Internet.InternetLive),
+    Layer.provideMerge(RegistryProxy.RegistryProxyLive),
+    Layer.provideMerge(Registry.RegistryLive),
+    Layer.provideMerge(Paths.PathsLive),
+    Layer.provideMerge(Docker.DockerLive),
+    Layer.provideMerge(Workerd.WorkerdLive),
+    Layer.provide(configProvider(options)),
+    Layer.provideMerge(
+      Layer.mergeAll(NodeServices.layer, FetchHttpClient.layer, SecureRandom.layerWebCrypto),
+    ),
+  );
+
+export const localRuntimeLayer = makeLocalRuntimeLayer();
 
 export interface TestWorker {
   baseUrl: URL;
@@ -85,18 +90,15 @@ export interface TestWorker {
  * The returned `fetch` accepts a path or full URL; relative paths are
  * resolved against the worker's base URL.
  */
-export const startTestWorker = <B extends BindingHooks>(
-  worker: RuntimeWorker<B>,
-) =>
+export const startTestWorker = <B extends BindingHooks>(worker: RuntimeWorker<B>) =>
   Effect.gen(function* () {
     const runtime = yield* Runtime.Runtime;
     const baseUrl = yield* runtime.start(worker);
     const fetch = (path: string, init?: RequestInit) =>
+      // oxlint-disable-next-line effecttsgo/global-fetch-in-effect -- test helper exposes the native Response/RequestInit API to many suites
       Effect.promise(() => globalThis.fetch(new URL(path, baseUrl), init));
     const fetchText = (path: string, init?: RequestInit) =>
-      fetch(path, init).pipe(
-        Effect.flatMap((res) => Effect.promise(() => res.text())),
-      );
+      fetch(path, init).pipe(Effect.flatMap((res) => Effect.promise(() => res.text())));
     const fetchJson = <T>(path: string, init?: RequestInit) =>
       fetch(path, init).pipe(
         Effect.flatMap((res) => Effect.promise(() => res.json() as Promise<T>)),
@@ -110,9 +112,7 @@ export const waitForRegistryEntry = Effect.fn(function* (
 ) {
   const registry = yield* Registry.Registry;
   const queue = yield* Queue.unbounded<ResolvedTargetMap, Done<void>>();
-  yield* registry
-    .subscribe([subscriber])
-    .pipe(Stream.runIntoQueue(queue), Effect.forkScoped);
+  yield* registry.subscribe([subscriber]).pipe(Stream.runIntoQueue(queue), Effect.forkScoped);
   while (true) {
     const value = yield* Queue.take(queue);
     const isDefined = resolvedTargetKey(subscriber) in value;
@@ -134,9 +134,7 @@ export const poll = <T>(
 ) =>
   worker.fetchJson<T>(path).pipe(
     Effect.flatMap((value) =>
-      predicate(value)
-        ? Effect.succeed(value)
-        : Effect.fail(new PredicateFailed({ value: value })),
+      predicate(value) ? Effect.succeed(value) : Effect.fail(new PredicateFailed({ value: value })),
     ),
     Effect.retry({
       while: (error) => error._tag === "PredicateFailed",
@@ -152,6 +150,7 @@ export const poll = <T>(
  */
 const realDelay = (millis: number) =>
   Effect.callback<void>((resume) => {
+    // oxlint-disable-next-line effecttsgo/global-timers-in-effect -- must bypass the Effect Clock so it advances under TestClock
     const timer = setTimeout(() => resume(Effect.void), millis);
     return Effect.sync(() => clearTimeout(timer));
   });

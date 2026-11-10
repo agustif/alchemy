@@ -1,53 +1,83 @@
 /**
  * Icon resolution for the docs chrome (tab bar + sidebar group headings).
  *
- * Three sources, all 24×24 viewBox and theme-adaptive via `currentColor`:
+ * Two sources, both 24×24 viewBox and theme-adaptive via `currentColor`:
  * - lucide (stroke outlines) for generic concepts (tutorial, data, guides…)
- * - simple-icons (fill) for official provider brand marks (Cloudflare, AWS…)
- * - custom (fill) for brand marks simple-icons has not caught up with yet
+ * - vendored official brand marks (fill) for providers (Cloudflare, AWS…)
  */
 import { icons as lucide } from "@iconify-json/lucide";
-import { icons as brands } from "@iconify-json/simple-icons";
 
 /**
- * Brand marks in the same body format simple-icons emits, for vendors whose
- * upstream icon is stale. Delete an entry once simple-icons ships the new
- * mark and move the call site back to `b()`.
+ * Brand marks, vendored from each vendor's own brand assets into
+ * `src/icons/brands/<name>.svg` (each file names its source). Every file is
+ * a 24×24 single-color mark drawn in currentColor, except the `-color`
+ * variants used on marketing surfaces.
  */
-const custom: Record<string, string> = {
-  // Prisma's 2026 prism mark; simple-icons still ships the pre-2026 logo.
-  // Traced from the "Symbol" artwork in Prisma's brand kit (263×264), scaled
-  // uniformly and centred — the mark must not be stretched to fill the box.
-  prisma:
-    '<path fill="currentColor" d="M5.2578 8.4091L0.0455 13.6308V4.8636L4.8828 0.0095V0H13.6385L5.2578 8.4091Z M23.9545 8.3405L8.3231 24H0.0455V15.6572L15.6745 0H23.9545V8.3405Z M19.1078 24H10.3521L14.2685 20.0703L23.9546 10.3667V19.1364L19.1078 24Z"/>',
-};
+const brandFiles = import.meta.glob<string>("./icons/brands/*.svg", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
+const brandMarks: Record<string, string> = Object.fromEntries(
+  Object.entries(brandFiles).map(([file, svg]) => [
+    file.replace(/^.*\/(.*)\.svg$/, "$1"),
+    svg
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/^[\s\S]*?<svg[^>]*>/, "")
+      .replace(/<\/svg>\s*$/, "")
+      .trim(),
+  ]),
+);
 
 const l = (name: string): string | undefined => lucide.icons[name]?.body;
-const b = (name: string): string | undefined => brands.icons[name]?.body;
-const c = (name: string): string | undefined => custom[name];
+const b = (name: string): string | undefined => brandMarks[name];
+
+/**
+ * An icon for a diagram node: a lucide name (`database`, `server`), or a
+ * vendored brand mark as `brand:<name>` (`brand:docker`, `brand:postgresql`).
+ */
+export function diagramIcon(name: string): string | undefined {
+  return name.startsWith("brand:") ? b(name.slice("brand:".length)) : l(name);
+}
 
 /** Tab bar icons, keyed by tab label (see docs-tabs.ts). */
 export const TAB_ICONS: Record<string, string | undefined> = {
   Core: l("book-open"),
   CLI: l("square-terminal"),
   Cloudflare: b("cloudflare"),
-  AWS: b("amazonwebservices"),
+  AWS: b("aws"),
+  GCP: b("gcp"),
   Hetzner: b("hetzner"),
-  Fly: b("flydotio"),
+  Fly: b("fly"),
   Railway: b("railway"),
   PlanetScale: b("planetscale"),
   Neon: b("neon"),
-  Prisma: c("prisma"),
-  Axiom: l("activity"),
-  "Better Auth": l("key-round"),
+  Turso: b("turso"),
+  E2B: b("e2b"),
+  Daytona: b("daytona"),
+  Modal: b("modal"),
+  Archil: b("archil"),
+  Boat: b("boat"),
+  Prisma: b("prisma"),
+  // Brand-colored prism for marketing surfaces.
+  PrismaColor: b("prisma-color"),
+  Axiom: b("axiom"),
+  "Better Auth": b("betterauth"),
   GitHub: b("github"),
+  Git: b("git"),
+  Stripe: b("stripe"),
   Docker: b("docker"),
   Kubernetes: b("kubernetes"),
+  Rivet: b("rivet"),
+  "Effect Cluster": b("effect"),
   Drizzle: b("drizzle"),
   SQL: l("database"),
   Command: l("square-terminal"),
+  ACME: l("shield-check"),
+  Domain: l("blocks"),
   Reference: l("code"),
   Blog: l("newspaper"),
+  Compare: l("scale"),
 };
 
 /** Sidebar group-heading icons, keyed by (normalized) group label. */
@@ -68,37 +98,88 @@ const GROUP_ICONS: Record<string, string | undefined> = {
   Frontend: l("layout-template"),
   APIs: l("braces"),
   Data: l("database"),
+  Storage: l("hard-drive"),
+  Databases: l("database"),
+  Access: l("key-round"),
   Messaging: l("send"),
   "Messaging & Events": l("send"),
   "Messaging & events": l("send"),
   Email: l("mail"),
   AI: l("sparkles"),
   "Security & secrets": l("lock"),
+  "Accounts & access": l("key-round"),
+  "Access & security": l("key-round"),
+  "Storage & databases": l("database"),
+  "Networking & edge": l("globe"),
+  Workers: l("zap"),
+  Engines: l("cpu"),
+  Postgres: l("database"),
+  Applications: l("app-window"),
+  Organization: l("building"),
+  "Durable Objects": l("box"),
+  Workflows: l("workflow"),
+  Containers: l("container"),
   Observability: l("activity"),
   Networking: l("globe"),
   Guides: l("map"),
   Resources: l("boxes"),
   Concepts: l("book-text"),
+  Sandboxes: l("box"),
+  Events: l("bell"),
+  Clusters: l("network"),
+  Workloads: l("container"),
+  Objects: l("file-code"),
+  Frontends: l("monitor-smartphone"),
+  Security: l("shield-check"),
+  Sandboxes: l("box"),
+  "Consistency patterns": l("git-merge"),
+  Hosting: l("server"),
+  Clients: l("plug"),
+  Patterns: l("puzzle"),
+  Operations: l("gauge"),
+  Platforms: l("cloud"),
+  "Building Actors": l("boxes"),
+  "Running Rivet": l("server-cog"),
+  Building: l("boxes"),
+  Running: l("server-cog"),
+  "Rivet Services": l("waves"),
+  Testing: l("flask-conical"),
+  Domain: l("blocks"),
   // Reference tab: provider groups get their official brand marks.
-  AWS: b("amazonwebservices"),
+  AWS: b("aws"),
   Cloudflare: b("cloudflare"),
+  GCP: b("gcp"),
   Hetzner: b("hetzner"),
-  Fly: b("flydotio"),
+  Fly: b("fly"),
   Railway: b("railway"),
   GitHub: b("github"),
   Neon: b("neon"),
+  Turso: b("turso"),
+  E2B: b("e2b"),
+  Daytona: b("daytona"),
+  Modal: b("modal"),
+  Archil: b("archil"),
+  Boat: b("boat"),
   Planetscale: b("planetscale"),
   PlanetScale: b("planetscale"),
-  Prisma: c("prisma"),
-  Axiom: l("activity"),
+  Prisma: b("prisma"),
+  Axiom: b("axiom"),
   Docker: b("docker"),
   Kubernetes: b("kubernetes"),
+  Rivet: b("rivet"),
+  Cluster: b("effect"),
   Drizzle: b("drizzle"),
+  BetterAuth: b("betterauth"),
+  Doppler: b("doppler"),
+  Infisical: b("infisical"),
+  Git: b("git"),
+  "Prisma ORM": b("prisma"),
   SQL: l("database"),
   "Effect SQL": l("database-zap"),
   Migrations: l("list-ordered"),
   Command: l("square-terminal"),
   Stripe: b("stripe"),
+  ACME: l("shield-check"),
 };
 
 /**

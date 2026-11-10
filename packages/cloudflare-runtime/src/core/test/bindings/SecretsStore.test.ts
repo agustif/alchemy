@@ -21,11 +21,12 @@
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it, layer } from "@effect/vitest";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import * as KvNamespace from "../../bindings/kv-namespace/index.ts";
 import * as SecretsStore from "../../bindings/secrets-store/index.ts";
 import * as Docker from "../../Docker.ts";
@@ -37,11 +38,7 @@ import * as Runtime from "../../Runtime.ts";
 import * as RuntimeServices from "../../RuntimeServices.ts";
 import * as Workerd from "../../workerd/Workerd.ts";
 import type { TestWorker } from "../helpers/runtime.ts";
-import {
-  localRuntimeLayer,
-  makeTempDirectory,
-  startTestWorker,
-} from "../helpers/runtime.ts";
+import { localRuntimeLayer, makeTempDirectory, startTestWorker } from "../helpers/runtime.ts";
 
 // -----------------------------------------------------------------------------
 // Test worker: drives secret bindings and the admin seeding surface over HTTP
@@ -93,16 +90,9 @@ export default {
 `;
 
 const compatibilityDate = "2026-03-10";
-const modules = [
-  { name: "main.js", type: "ESModule", content: TEST_SCRIPT },
-] as const;
+const modules = [{ name: "main.js", type: "ESModule", content: TEST_SCRIPT }] as const;
 
-const seed = (
-  worker: TestWorker,
-  binding: string,
-  name: string,
-  value: string | null,
-) =>
+const seed = (worker: TestWorker, binding: string, name: string, value: string | null) =>
   worker
     .fetchText("/seed", {
       method: "POST",
@@ -140,9 +130,7 @@ layer(localRuntimeLayer)("SecretsStore binding", (it) => {
 
       const missing = yield* worker.fetch("/secret");
       expect(missing.status).toBe(404);
-      expect(yield* Effect.promise(() => missing.text())).toBe(
-        'Secret "secret_name" not found',
-      );
+      expect(yield* Effect.promise(() => missing.text())).toBe('Secret "secret_name" not found');
 
       yield* seed(worker, "ADMIN", "secret_name", "example");
 
@@ -237,9 +225,7 @@ layer(localRuntimeLayer)("SecretsStore binding", (it) => {
 
       const missing = yield* worker.fetch("/secret");
       expect(missing.status).toBe(404);
-      expect(yield* Effect.promise(() => missing.text())).toBe(
-        'Secret "secret_name" not found',
-      );
+      expect(yield* Effect.promise(() => missing.text())).toBe('Secret "secret_name" not found');
     }).pipe(Effect.scoped),
   );
 
@@ -268,9 +254,7 @@ layer(localRuntimeLayer)("SecretsStore binding", (it) => {
       expect(yield* worker.fetchText("/secret")).toBe("secret-value");
 
       // The KV namespace with the same identifier sees none of it.
-      const kv = yield* worker.fetchJson<{ value: string | null }>(
-        "/kv?key=secret_name",
-      );
+      const kv = yield* worker.fetchJson<{ value: string | null }>("/kv?key=secret_name");
       expect(kv.value).toBeNull();
     }).pipe(Effect.scoped),
   );
@@ -301,7 +285,7 @@ describe("SecretsStore binding persistence", () => {
           Layer.provide(Docker.DockerLive),
           Layer.provide(Workerd.WorkerdLive),
           Layer.provideMerge(
-            Layer.mergeAll(NodeServices.layer, FetchHttpClient.layer),
+            Layer.mergeAll(NodeServices.layer, FetchHttpClient.layer, SecureRandom.layerWebCrypto),
           ),
         );
 
@@ -326,8 +310,7 @@ describe("SecretsStore binding persistence", () => {
             });
             yield* run(worker);
           },
-          (self) =>
-            self.pipe(Effect.provide(runtimeLayerTempDir), Effect.scoped),
+          (self) => self.pipe(Effect.provide(runtimeLayerTempDir), Effect.scoped),
         );
 
         yield* runAgainstStorage((worker) =>
@@ -341,9 +324,7 @@ describe("SecretsStore binding persistence", () => {
         // store's blobs, mirroring the KV persistence layout under a distinct
         // `secrets-store` root.
         const names = yield* fs.readDirectory(path.join(tmp, "secrets-store"));
-        expect(names).toContain(
-          "cloudflare-runtime-secrets-store-KVNamespaceObject",
-        );
+        expect(names).toContain("cloudflare-runtime-secrets-store-KVNamespaceObject");
         expect(names).toContain("persist_store");
 
         // "Restarting" keeps persisted data.

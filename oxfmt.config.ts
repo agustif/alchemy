@@ -1,16 +1,23 @@
-import { defineConfig } from "oxfmt";
+import { defineConfig, type OxfmtConfig } from "oxfmt";
 
 export default defineConfig({
   semi: true,
   singleQuote: false,
   tabWidth: 2,
   useTabs: false,
-  printWidth: 80,
+  printWidth: 100,
   endOfLine: "lf",
+  trailingComma: "all",
   ternaries: true,
-  sortImports: false,
+  sortPackageJson: true,
+  insertFinalNewline: true,
+  embeddedLanguageFormatting: "auto",
+  sortImports: {
+    newlinesBetween: false,
+  },
   ignorePatterns: [
     "dist/**",
+    "submodules/**",
     "*.min.js",
     "**/lib/**",
     "**/mdx/**",
@@ -22,8 +29,10 @@ export default defineConfig({
     "**/test-results/**",
     "examples/prisma-tanstack-start/src/prisma/contract.d.ts",
     "examples/prisma-tanstack-start/src/prisma/contract.json",
-    "**/package.json",
-    "./submodules",
     "**/fixtures/chart/templates/**",
+    // Written by the BuildKit oracle; regenerated, never edited.
+    "packages/integration-tests/test/Docker/dockerfile-conformance/cases/**",
+    "packages/integration-tests/test/Docker/dockerfile-conformance/cases.json",
+    "packages/integration-tests/test/Docker/dockerfile-conformance/words/**",
   ],
-});
+} satisfies OxfmtConfig);

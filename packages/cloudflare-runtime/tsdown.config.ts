@@ -39,12 +39,16 @@ const workerConfig = (
     InternalWorkerExportPlugin(),
   ] as unknown as UserConfig["plugins"],
   deps: {
+    neverBundle: [/^cloudflare-internal:/],
     alwaysBundle: [/.+/],
   },
   outputOptions: {
     entryFileNames: "[name].mjs",
   },
 });
+
+// Declarations are emitted by tsrs, the same checker `pnpm typecheck` runs.
+const DTS = { incremental: false, generator: "tsrs" } as const;
 
 export default defineConfig([
   {
@@ -54,7 +58,7 @@ export default defineConfig([
     outDir: "dist/rolldown",
     tsconfig: "tsconfig.json",
     unbundle: true,
-    dts: { incremental: false },
+    dts: DTS,
     shims: false,
     sourcemap: true,
     target: "esnext",
@@ -78,8 +82,7 @@ export default defineConfig([
   // the path `worker:` imports resolve to.
   workerConfig(
     {
-      "bindings/r2-bucket/R2Bucket.worker":
-        "src/core/bindings/r2-bucket/R2Bucket.worker.ts",
+      "bindings/r2-bucket/R2Bucket.worker": "src/core/bindings/r2-bucket/R2Bucket.worker.ts",
     },
     { clean: false },
   ),
@@ -98,7 +101,7 @@ export default defineConfig([
     outDir: "dist/core/node",
     tsconfig: "tsconfig.json",
     unbundle: true,
-    dts: { incremental: false },
+    dts: DTS,
     shims: false,
     target: "esnext",
     format: "esm",
@@ -148,7 +151,7 @@ export default defineConfig([
     exports: false,
     outDir: "dist/vite/node",
     tsconfig: "tsconfig.json",
-    dts: { incremental: false },
+    dts: DTS,
     shims: false,
     target: "esnext",
     format: "esm",
@@ -159,10 +162,7 @@ export default defineConfig([
       neverBundle: [/^@alchemy\.run\/cloudflare-runtime(?:\/|$)/],
     },
     inputOptions: {
-      external: [
-        /^#cloudflare-runtime-/,
-        /^@alchemy\.run\/cloudflare-runtime(?:\/|$)/,
-      ],
+      external: [/^#cloudflare-runtime-/, /^@alchemy\.run\/cloudflare-runtime(?:\/|$)/],
       makeAbsoluteExternalsRelative: true,
     },
     outputOptions: {
